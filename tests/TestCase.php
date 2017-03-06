@@ -23,11 +23,11 @@
  * SOFTWARE.
  */
 
-namespace SomozaTest\Unit\Psr7\OAuth2Middleware;
+namespace SomozaTest\OAuth2Middleware;
+
+use Mockery as m;
 
 /**
- * Class TestCase
- *
  * @author Gabriel Somoza <gabriel@somoza.me>
  */
 class TestCase extends \PHPUnit_Framework_TestCase
@@ -57,5 +57,11 @@ class TestCase extends \PHPUnit_Framework_TestCase
         $prop = new \ReflectionProperty($object, $name);
         $prop->setAccessible(true);
         return $prop->getValue($object);
+    }
+
+    public function tearDown()
+    {
+        parent::tearDown();
+        m::close();
     }
 }

@@ -30,9 +30,10 @@ use GuzzleHttp\Psr7\Response;
 use League\OAuth2\Client\Provider\AbstractProvider;
 use League\OAuth2\Client\Token\AccessToken;
 use Psr\Http\Message\RequestInterface;
-use Somoza\Psr7\OAuth2Middleware\Bearer;
-use Somoza\Psr7\OAuth2Middleware\Util\StringWhitelist;
-use Somoza\Psr7\OAuth2Middleware\Util\Whitelist;
+use Somoza\OAuth2Middleware\TokenService\AbstractTokenService;
+use Somoza\OAuth2Middleware\TokenService\Bearer;
+use Mockery as m;
+use SomozaTest\OAuth2Middleware\TestCase;
 
 /**
  * Class BearerTest
@@ -40,7 +41,7 @@ use Somoza\Psr7\OAuth2Middleware\Util\Whitelist;
  */
 class BearerTest extends TestCase
 {
-    /** @var \PHPUnit_Framework_MockObject_MockObject|AbstractProvider */
+    /** @var AbstractProvider|m\Mock */
     private $provider;
 
     /**
@@ -49,65 +50,56 @@ class BearerTest extends TestCase
      */
     public function setUp()
     {
-        $this->provider = $this->getMockForAbstractClass(
-            AbstractProvider::class,
-            [],
-            '',
-            true,
-            true,
-            true,
-            ['getAccessToken']
-        );
+        $this->provider = m::mock(AbstractProvider::class);
     }
 
-    /**
-     * tearDown
-     * @return void
-     */
-    public function tearDown()
-    {
-        $this->provider = null;
-    }
-
-    /**
-     * testConstructorWithoutAccessToken
-     * @test
-     */
-    public function can_construct_without_access_token()
+    public function testConstructorWithoutAccessToken()
     {
         $instance = new Bearer($this->provider);
-        $token = $this->getPropVal($instance, 'accessToken');
-        $this->assertNull($token);
+
+        $method = new \ReflectionMethod(AbstractTokenService::class, 'getAccessToken');
+        $method->setAccessible(true);
+
+        // test that a dummy token was created
+        $token = $method->invoke($instance);
+        $this->assertInstanceOf(AccessToken::class, $token);
+        /** @var AccessToken $token */
+        $this->assertTrue($token->hasExpired());
     }
 
-    /**
-     * testConstructorWithAccessToken
-     * @test
-     */
-    public function can_construct_with_access_token()
+    public function testConstructorWithAccessToken()
     {
         $token = new AccessToken(['access_token' => '123']);
         $instance = new Bearer($this->provider, $token);
-        $result = $this->getPropVal($instance, 'accessToken');
+        $method = new \ReflectionMethod(AbstractTokenService::class, 'getAccessToken');
+        $method->setAccessible(true);
+
+        // test that a dummy token was created
+        $result = $method->invoke($instance);
+
         $this->assertSame($token, $result);
     }
 
-    /**
-     * testRequestNewAccessToken
-     * @test
-     */
-    public function can_request_new_access_token()
+    public function testShouldRequestNewAccessTokenIfNoToken()
     {
-        $this->provider->expects($this->once())
-            ->method('getAccessToken')
+        $accessToken = m::mock(AccessToken::class, ['getToken' => 'abc']);
+        $this->provider->shouldReceive('getAccessToken')
+            ->once()
             ->with('client_credentials')
-            ->willReturn('123');
+            ->andReturn($accessToken);
 
-        $instance = new Bearer($this->provider);
+        $instance = new Bearer($this->provider); // with an expired token
 
-        $this->invoke($instance, 'checkAccessToken');
+        $request = new Request('GET', '/secured/resource');
+        $instance->authorize($request);
 
-        $this->assertEquals('123', $this->getPropVal($instance, 'accessToken'));
+        $method = new \ReflectionMethod(AbstractTokenService::class, 'getAccessToken');
+        $method->setAccessible(true);
+
+        // test that the token was returned
+        $result = $method->invoke($instance);
+
+        $this->assertSame($accessToken, $result);
     }
 
     /**
@@ -116,98 +108,28 @@ class BearerTest extends TestCase
      *
      * @test
      */
-    public function should_skip_requests_with_authorization_header()
+    public function testShouldSkipAuthorizedRequests()
     {
-        $request = new Request('GET', 'http://foo.bar/oauth', [Bearer::HEADER_AUTHORIZATION => null]);
-        $instance = new Bearer($this->provider);
+        $instance = new Bearer($this->provider); // with an expired token
+        $request = new Request('GET', '/secured/resource', ['Authorization' => 'Bearer 123']);
 
-        $result = $this->invoke($instance, 'authorizeRequest', [$request]);
+        $result = $instance->authorize($request);
+
         $this->assertSame($request, $result);
+        $this->provider->shouldNotHaveReceived('getAccessToken');
     }
 
-    /**
-     * should_allow_all_http_request_methods
-     * @test
-     * @dataProvider httpMethodsProvider
-     * @param $method
-     */
-    public function should_allow_all_http_request_methods($method)
+    public function testShouldRefreshTokenIfExpired()
     {
-        $request = new Request($method, 'http://foo.bar/oauth');
-        $instance = new Bearer($this->provider);
-
-        $accessToken = new AccessToken(['access_token' => '123']);
-        $this->provider->expects($this->once())
-            ->method('getAccessToken')
-            ->willReturn($accessToken);
-
-        $result = $this->invoke($instance, 'authorizeRequest', [$request]);
-
-        $this->assertResultAuthorizedWithToken($result, $accessToken);
-    }
-
-    /**
-     * httpMethodsProvider
-     * @return array
-     * @see https://www.w3.org/Protocols/rfc2616/rfc2616-sec9.html
-     */
-    public function httpMethodsProvider()
-    {
-        return [
-            ['GET'], ['POST'], ['PATCH'], ['PUT'], ['OPTIONS'], ['DELETE'], ['HEAD'], ['CONNECT'], ['TRACE']
-        ];
-    }
-
-    /**
-     * should_skip_requests_to_authorization_uri
-     * @test
-     */
-    public function should_skip_requests_to_authorization_uri()
-    {
-        $this->provider->expects($this->once())
-            ->method('getBaseAuthorizationUrl')
-            ->willReturn('http://foo.bar/oauth');
-        $instance = new Bearer($this->provider);
-        $request = new Request('GET', 'http://foo.bar/oauth');
-
-        $result = $this->invoke($instance, 'authorizeRequest', [$request]);
-        $this->assertSame($request, $result);
-    }
-
-    /**
-     * should_request_new_access_token_if_no_token
-     * @test
-     */
-    public function should_request_new_access_token_if_no_token()
-    {
-        $instance = new Bearer($this->provider);
-
-        $accessToken = new AccessToken(['access_token' => '123']);
-        $this->provider->expects($this->once())
-            ->method('getAccessToken')
-            ->willReturn($accessToken);
-
-        $request = new Request('GET', 'http://foo.bar/baz');
-
-        $result = $this->invoke($instance, 'authorizeRequest', [$request]);
-
-        $this->assertResultAuthorizedWithToken($result, $accessToken);
-    }
-
-    /**
-     * should_request_new_access_token_if_expired
-     * @test
-     */
-    public function should_request_new_access_token_if_expired()
-    {
-        $time = time();
-        $oldToken = new AccessToken(['access_token' => '123', 'expires' => $time]);
+        $pastTime = time() - 500;
+        $oldToken = new AccessToken(['access_token' => '123', 'expires' => $pastTime]);
         $newToken = new AccessToken(['access_token' => 'abc']);
 
-        $this->provider->expects($this->once())
-            ->method('getAccessToken')
+        $this->provider
+            ->shouldReceive('getAccessToken')
+            ->once()
             ->with('client_credentials')
-            ->willReturn($newToken);
+            ->andReturn($newToken);
 
         $instance = new Bearer($this->provider, $oldToken);
         $request = new Request('GET', 'http://foo.bar/baz');
@@ -394,7 +316,7 @@ class BearerTest extends TestCase
         $instance = new Bearer($this->provider);
 
         /** @var Whitelist $whitelist */
-        $whitelist = $this->getPropVal($instance, 'whitelist');
+        $whitelist = $this->getPropVal($instance, 'ignoredUris');
 
         $this->assertTrue($whitelist->allowed('oauth2/authorize'));
         $this->assertTrue($whitelist->allowed('oauth2/token'));
@@ -414,16 +336,16 @@ class BearerTest extends TestCase
         $instance = new Bearer($this->provider, null, null, $whitelist);
 
         //in white list
-        $this->assertTrue($this->invoke($instance, 'shouldSkipAuthorizationForUrl', ['url1']));
-        $this->assertTrue($this->invoke($instance, 'shouldSkipAuthorizationForUrl', ['url2']));
-        $this->assertTrue($this->invoke($instance, 'shouldSkipAuthorizationForUrl', ['url3']));
-        $this->assertTrue($this->invoke($instance, 'shouldSkipAuthorizationForUrl', ['url4']));
+        $this->assertTrue($this->invoke($instance, 'shouldSkipAuthorizationForUri', ['url1']));
+        $this->assertTrue($this->invoke($instance, 'shouldSkipAuthorizationForUri', ['url2']));
+        $this->assertTrue($this->invoke($instance, 'shouldSkipAuthorizationForUri', ['url3']));
+        $this->assertTrue($this->invoke($instance, 'shouldSkipAuthorizationForUri', ['url4']));
 
         //not in white list
-        $this->assertFalse($this->invoke($instance, 'shouldSkipAuthorizationForUrl', ['url5']));
-        $this->assertFalse($this->invoke($instance, 'shouldSkipAuthorizationForUrl', ['']));
-        $this->assertFalse($this->invoke($instance, 'shouldSkipAuthorizationForUrl', [null]));
-        $this->assertFalse($this->invoke($instance, 'shouldSkipAuthorizationForUrl', ['http://missing.com']));
+        $this->assertFalse($this->invoke($instance, 'shouldSkipAuthorizationForUri', ['url5']));
+        $this->assertFalse($this->invoke($instance, 'shouldSkipAuthorizationForUri', ['']));
+        $this->assertFalse($this->invoke($instance, 'shouldSkipAuthorizationForUri', [null]));
+        $this->assertFalse($this->invoke($instance, 'shouldSkipAuthorizationForUri', ['http://missing.com']));
     }
 
 
