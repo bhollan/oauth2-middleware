@@ -10,8 +10,6 @@
 
 PSR7 middleware that uses league/oauth2-client to authenticate requests with an OAuth2 server.
 
-NOTE: the current version of this middleware only supports the "client_credentials" grant type.
-
 ## Installation
 
 ```
@@ -20,12 +18,12 @@ composer require somoza/oauth2-client-middleware
 
 ## Usage
 
-The current implementation is tied to Guzzle 6, because its a direct dependency of `league/oauth2-client`.
+The current implementation indirectly depends on Guzzle 6 because it's a direct dependency of `league/oauth2-client`.
 
 Using Guzzle:
 
 ```php
-use Somoza\Psr7\OAuth2Middleware;
+use Somoza\Middleware;
 
 $stack = new \GuzzleHttp\HandlerStack();
 $stack->setHandler(new CurlHandler());
@@ -44,8 +42,14 @@ $provider = new GenericProvider(
 );
 
 // attach our oauth2 middleware
-$oauth2 = new OAuth2Middleware\Bearer($provider);
-$stack->push($oauth2);
+$oauth2Middleware = new Middleware\Middleware(
+    new Middleware\TokenService\Bearer($provider),
+    [ // ignore (do not attempt to authorize) the following URLs
+        $provider->getBaseAuthorizationUrl(),
+        $provider->getBaseAccessTokenUrl(),
+    ]
+);
+$stack->push($oauth2Middleware);
 
 // if you want to debug, it might be useful to attach a PSR7 logger here
 ```
@@ -58,7 +62,7 @@ the security implications of storing an access token (do it at your own risk).
 Example:
 
 ```php
-use Somoza\Psr7\OAuth2Middleware;
+use Somoza\Psr7\Middleware;
 use League\OAuth2\Client\Token\AccessToken;
 
 // see previous example for initialization
@@ -69,7 +73,7 @@ if ($tokenStore->contains($userId)) {
     $token = new AccessToken($tokenData);
 }
 
-$oauth2 = new OAuth2Middleware\Bearer(
+$oauth2 = new Middleware\Bearer(
     $provider, 
     $token, // null if nothing was stored - an instance of AccessToken otherwise 
     function(AccessToken $newToken) use ($tokenStore, $userId) {

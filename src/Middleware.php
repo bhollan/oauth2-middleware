@@ -9,7 +9,7 @@ use Somoza\OAuth2Middleware\TokenService\AuthorizesRequests;
 /**
  * @author Gabriel Somoza <gabriel@strategery.io>
  */
-final class OAuth2Middleware
+final class Middleware
 {
     /** @var AuthorizesRequests */
     private $tokenService;
@@ -18,7 +18,7 @@ final class OAuth2Middleware
     private $ignoredUris;
 
     /**
-     * OAuth2Middleware constructor.
+     * Middleware constructor.
      * @param AuthorizesRequests $tokenService
      * @param \string[] $ignoredUris
      */
