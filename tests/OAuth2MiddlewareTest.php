@@ -4,10 +4,10 @@ namespace SomozaTest\OAuth2Middleware;
 
 use Assert\InvalidArgumentException;
 use GuzzleHttp\Psr7\Request;
+use Mockery as m;
 use Psr\Http\Message\RequestInterface;
 use Somoza\OAuth2Middleware\OAuth2Middleware;
 use Somoza\OAuth2Middleware\TokenService\AuthorizesRequests;
-use Mockery as m;
 
 /**
  * @author Gabriel Somoza <gabriel@strategery.io>

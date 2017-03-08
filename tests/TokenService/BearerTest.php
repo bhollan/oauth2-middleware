@@ -26,7 +26,6 @@
 namespace SomozaTest\Unit\Psr7\OAuth2Middleware;
 
 use GuzzleHttp\Psr7\Request;
-use GuzzleHttp\Psr7\Response;
 use League\OAuth2\Client\Provider\AbstractProvider;
 use League\OAuth2\Client\Token\AccessToken;
 use Mockery as m;
@@ -140,6 +139,18 @@ class BearerTest extends TestCase
         $this->assertResultAuthorizedWithToken($result, $newToken);
     }
 
+    /**
+     * @param RequestInterface $result
+     * @param AccessToken $accessToken
+     * @return void
+     */
+    private function assertResultAuthorizedWithToken(RequestInterface $result, AccessToken $accessToken)
+    {
+        $this->assertTrue($result->hasHeader(Bearer::HEADER_AUTHORIZATION));
+        $this->assertContains(Bearer::TOKEN_TYPE . ' ' . $accessToken->getToken(),
+            $result->getHeader(Bearer::HEADER_AUTHORIZATION));
+    }
+
     public function testShouldNotRequestNewAccessTokenIfTokenHasNoExpiration()
     {
         $validToken = new AccessToken(['access_token' => '123']);
@@ -168,7 +179,7 @@ class BearerTest extends TestCase
 
     public function testShouldInvokeCallbackIfTokenRenewed()
     {
-        $oldToken = new AccessToken(['access_token' => 'oldie', 'expires' => time()-300]);
+        $oldToken = new AccessToken(['access_token' => 'oldie', 'expires' => time() - 300]);
         $newToken = new AccessToken(['access_token' => '123']);
         $this->provider->shouldReceive('getAccessToken')
             ->once()
@@ -190,17 +201,5 @@ class BearerTest extends TestCase
 
         $this->assertTrue($callbackCalled);
         $this->assertResultAuthorizedWithToken($result, $newToken);
-    }
-
-    /**
-     * @param RequestInterface $result
-     * @param AccessToken $accessToken
-     * @return void
-     */
-    private function assertResultAuthorizedWithToken(RequestInterface $result, AccessToken $accessToken)
-    {
-        $this->assertTrue($result->hasHeader(Bearer::HEADER_AUTHORIZATION));
-        $this->assertContains(Bearer::TOKEN_TYPE . ' ' . $accessToken->getToken(),
-            $result->getHeader(Bearer::HEADER_AUTHORIZATION));
     }
 }

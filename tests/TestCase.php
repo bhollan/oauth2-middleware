@@ -32,6 +32,12 @@ use Mockery as m;
  */
 class TestCase extends \PHPUnit_Framework_TestCase
 {
+    public function tearDown()
+    {
+        parent::tearDown();
+        m::close();
+    }
+
     /**
      * invoke
      * @param $object
@@ -57,11 +63,5 @@ class TestCase extends \PHPUnit_Framework_TestCase
         $prop = new \ReflectionProperty($object, $name);
         $prop->setAccessible(true);
         return $prop->getValue($object);
-    }
-
-    public function tearDown()
-    {
-        parent::tearDown();
-        m::close();
     }
 }
