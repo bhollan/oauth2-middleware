@@ -23,7 +23,8 @@ The current implementation indirectly depends on Guzzle 6 because it's a direct 
 Using Guzzle:
 
 ```php
-use Somoza\Middleware;
+use Somoza\OAuth2Middleware\Middleware;
+use Somoza\OAuth2Middleware\TokenService\Bearer;
 
 $stack = new \GuzzleHttp\HandlerStack();
 $stack->setHandler(new CurlHandler());
@@ -42,8 +43,8 @@ $provider = new GenericProvider(
 );
 
 // attach our oauth2 middleware
-$oauth2Middleware = new Middleware\Middleware(
-    new Middleware\TokenService\Bearer($provider),
+$oauth2Middleware = new Middleware(
+    new Bearer($provider), // use the Bearer token type
     [ // ignore (do not attempt to authorize) the following URLs
         $provider->getBaseAuthorizationUrl(),
         $provider->getBaseAccessTokenUrl(),
@@ -62,7 +63,8 @@ the security implications of storing an access token (do it at your own risk).
 Example:
 
 ```php
-use Somoza\Psr7\Middleware;
+use Somoza\OAuth2Middleware\Middleware;
+use Somoza\OAuth2Middleware\TokenService\Bearer;
 use League\OAuth2\Client\Token\AccessToken;
 
 // see previous example for initialization
@@ -73,16 +75,19 @@ if ($tokenStore->contains($userId)) {
     $token = new AccessToken($tokenData);
 }
 
-$oauth2 = new Middleware\Bearer(
-    $provider, 
-    $token, // null if nothing was stored - an instance of AccessToken otherwise 
-    function(AccessToken $newToken) use ($tokenStore, $userId) {
-        // called whenever a new AccessToken is fetched
-        $tokenStore->save($userId, $newToken->jsonSerialize());
-    }
+$oauth2Middleware = new Middleware(
+    new Bearer(
+        $provider,
+        $token, 
+        function (AccessToken $newToken, AccessToken $oldToken) 
+          use ($tokenStore, $userId) {
+            // called whenever a new AccessToken is fetched
+            $tokenStore->save($userId, $newToken->jsonSerialize());
+        }
+    ), 
 );
 
-$stack->push($oauth2);
+$stack->push($oauth2Middleware);
 ```
 
 ## License
