@@ -56,7 +56,13 @@ abstract class AbstractTokenService implements AuthorizesRequests
     final public function authorize(RequestInterface $request): RequestInterface
     {
         if (!$this->isAuthorized($request)) {
-            if ($this->getAccessToken()->hasExpired()) {
+            try {
+                $hasExpired = $this->getAccessToken()->hasExpired();
+            } catch (\RuntimeException $e) {
+                $hasExpired = false; // token has no "expires" data, so we assume it hasn't expired
+            }
+
+            if ($hasExpired) {
                 $this->refreshToken();
             }
 

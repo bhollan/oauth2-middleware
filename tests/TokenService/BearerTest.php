@@ -29,10 +29,10 @@ use GuzzleHttp\Psr7\Request;
 use GuzzleHttp\Psr7\Response;
 use League\OAuth2\Client\Provider\AbstractProvider;
 use League\OAuth2\Client\Token\AccessToken;
+use Mockery as m;
 use Psr\Http\Message\RequestInterface;
 use Somoza\OAuth2Middleware\TokenService\AbstractTokenService;
 use Somoza\OAuth2Middleware\TokenService\Bearer;
-use Mockery as m;
 use SomozaTest\OAuth2Middleware\TestCase;
 
 /**
@@ -122,272 +122,85 @@ class BearerTest extends TestCase
     public function testShouldRefreshTokenIfExpired()
     {
         $pastTime = time() - 500;
-        $oldToken = new AccessToken(['access_token' => '123', 'expires' => $pastTime]);
+        $oldToken = new AccessToken(['access_token' => '123', 'expires' => $pastTime, 'refresh_token' => 'xyz',]);
         $newToken = new AccessToken(['access_token' => 'abc']);
 
         $this->provider
             ->shouldReceive('getAccessToken')
             ->once()
-            ->with('client_credentials')
+            ->with('refresh_token', ['refresh_token' => 'xyz'])
             ->andReturn($newToken);
 
         $instance = new Bearer($this->provider, $oldToken);
         $request = new Request('GET', 'http://foo.bar/baz');
 
-        $result = $this->invoke($instance, 'authorizeRequest', [$request]);
+        $result = $instance->authorize($request);
+
+        //$result = $this->invoke($instance, 'authorizeRequest', [$request]);
         $this->assertResultAuthorizedWithToken($result, $newToken);
     }
 
-    /**
-     * should_request_new_access_token_if_expired
-     * @test
-     */
-    public function should_refresh_access_token_if_expired()
-    {
-        $time = time();
-        $oldToken = new AccessToken(['access_token' => '123', 'refresh_token' => '567', 'expires' => $time]);
-        $newToken = new AccessToken(['access_token' => 'abc']);
-
-        $this->provider->expects($this->once())
-            ->method('getAccessToken')
-            ->with('refresh_token', ['refresh_token' => '567'])
-            ->willReturn($newToken);
-
-        $instance = new Bearer($this->provider, $oldToken);
-        $request = new Request('GET', 'http://foo.bar/baz');
-
-        $result = $this->invoke($instance, 'authorizeRequest', [$request]);
-        $this->assertResultAuthorizedWithToken($result, $newToken);
-    }
-
-    /**
-     * should_not_request_new_access_token_if_token_still_valid
-     * @test
-     */
-    public function should_not_request_new_access_token_if_token_has_no_expiration()
+    public function testShouldNotRequestNewAccessTokenIfTokenHasNoExpiration()
     {
         $validToken = new AccessToken(['access_token' => '123']);
 
-        $this->provider->expects($this->never())
-            ->method('getAccessToken');
+        $this->provider->shouldNotReceive('getAccessToken');
 
         $instance = new Bearer($this->provider, $validToken);
         $request = new Request('GET', 'http://foo.bar/baz');
-        $result = $this->invoke($instance, 'authorizeRequest', [$request]);
+        $result = $instance->authorize($request);
 
         $this->assertResultAuthorizedWithToken($result, $validToken);
     }
 
-    /**
-     * should_not_request_new_access_token_if_token_still_valid
-     * @test
-     */
-    public function should_not_request_new_access_token_if_token_still_valid()
+    public function testShouldNotRefreshTokenIfStillValid()
     {
-        $time = time() + 3600;
-        $validToken = new AccessToken(['access_token' => '123', 'expires' => $time]);
+        $validToken = new AccessToken(['access_token' => '123', 'expires_in' => 300]);
 
-        $this->provider->expects($this->never())
-            ->method('getAccessToken');
+        $this->provider->shouldNotReceive('getAccessToken');
 
         $instance = new Bearer($this->provider, $validToken);
         $request = new Request('GET', 'http://foo.bar/baz');
-        $result = $this->invoke($instance, 'authorizeRequest', [$request]);
+        $result = $instance->authorize($request);
 
         $this->assertResultAuthorizedWithToken($result, $validToken);
     }
 
-    /**
-     * invoke_should_return_function
-     * @test
-     */
-    public function invoke_should_return_function()
+    public function testShouldInvokeCallbackIfTokenRenewed()
     {
-        $callback = function() {};
-
-        $instance = new Bearer($this->provider);
-        $this->assertTrue(method_exists($instance, '__invoke'));
-
-        $func = $instance->__invoke($callback);
-
-        $this->assertInternalType('callable', $func);
-    }
-
-    /**
-     * @test
-     */
-    public function should_invoke_token_callback_if_token_renewed()
-    {
-        $accessToken = new AccessToken(['access_token' => '123']);
-        $this->provider->expects($this->once())
-            ->method('getAccessToken')
-            ->willReturn($accessToken);
-        $tokenCallbackCalled = false;
+        $oldToken = new AccessToken(['access_token' => 'oldie', 'expires' => time()-300]);
+        $newToken = new AccessToken(['access_token' => '123']);
+        $this->provider->shouldReceive('getAccessToken')
+            ->once()
+            ->andReturn($newToken);
 
         // the callback that we're testing
-        $tokenCallback = function (AccessToken $token, AccessToken $oldToken = null) use (&$tokenCallbackCalled, $accessToken) {
-            $tokenCallbackCalled = true;
-            $this->assertSame($token, $accessToken);
-            $this->assertSame(null, $oldToken);
-        };
-
-        $instance = new Bearer($this->provider, null, $tokenCallback);
-        $request = new Request('GET', 'http://foo.bar/baz');
-
-        $result = $this->invoke($instance, 'authorizeRequest', [$request]);
-
-        $this->assertResultAuthorizedWithToken($result, $accessToken);
-    }
-
-    /**
-     * @test
-     */
-    public function should_invoke_token_callback_including_old_token_if_token_renewed()
-    {
-        $oldAccessToken = new AccessToken(['access_token' => 'oldie', 'expires' => time()]);
-        $accessToken = new AccessToken(['access_token' => '123']);
-
-        $this->provider->expects($this->once())
-            ->method('getAccessToken')
-            ->willReturn($accessToken);
-        $tokenCallbackCalled = false;
-
-        // the callback that we're testing
-        $tokenCallback = function (AccessToken $token, AccessToken $oldToken) use (&$tokenCallbackCalled, $accessToken, $oldAccessToken) {
-            $tokenCallbackCalled = true;
-            $this->assertSame($token, $accessToken);
-            $this->assertSame($oldAccessToken, $oldToken);
-        };
-
-        $instance = new Bearer($this->provider, $oldAccessToken, $tokenCallback);
-        $request = new Request('GET', 'http://foo.bar/baz');
-
-        $result = $this->invoke($instance, 'authorizeRequest', [$request]);
-
-        $this->assertResultAuthorizedWithToken($result, $accessToken);
-    }
-
-    /**
-     * End-to-end test
-     *
-     * @test
-     */
-    public function invoke_function_should_authorize()
-    {
         $callbackCalled = false;
-        $callback = function(RequestInterface $request, array $options) use (&$callbackCalled) {
+        $tokenCallback = function (AccessToken $newTokenActual, AccessToken $oldTokenActual = null)
+        use ($newToken, $oldToken, &$callbackCalled) {
             $callbackCalled = true;
-            $this->assertEquals(['foo' => 'bar'], $options);
-            $this->assertTrue($request->hasHeader(Bearer::HEADER_AUTHORIZATION));
-            return new Response(); // ok
+            $this->assertSame($newTokenActual, $newToken);
+            $this->assertSame($oldToken, $oldTokenActual);
         };
 
-        $validToken = new AccessToken(['access_token' => 'abc']);
-        $this->provider->expects($this->once())
-            ->method('getAccessToken')
-            ->willReturn($validToken);
-
+        $instance = new Bearer($this->provider, $oldToken, $tokenCallback);
         $request = new Request('GET', 'http://foo.bar/baz');
-        $options = ['foo' => 'bar'];
 
-        /** @var Bearer|\PHPUnit_Framework_MockObject_MockObject $instance */
-        $instance = new Bearer($this->provider);
-        $func = $instance->__invoke($callback);
-
-        $func($request, $options);
+        $result = $instance->authorize($request);
 
         $this->assertTrue($callbackCalled);
+        $this->assertResultAuthorizedWithToken($result, $newToken);
     }
 
     /**
-     * @test
-     * Test that authorization url and base access token url are white-listed by default
-     */
-    public function should_whitelist_base_urls_by_default()
-    {
-        $this->provider->expects($this->once())
-            ->method('getBaseAuthorizationUrl')
-            ->willReturn('oauth2/authorize');
-
-        $this->provider->expects($this->once())
-            ->method('getBaseAccessTokenUrl')
-            ->willReturn('oauth2/token');
-
-        $instance = new Bearer($this->provider);
-
-        /** @var Whitelist $whitelist */
-        $whitelist = $this->getPropVal($instance, 'ignoredUris');
-
-        $this->assertTrue($whitelist->allowed('oauth2/authorize'));
-        $this->assertTrue($whitelist->allowed('oauth2/token'));
-    }
-
-    /**
-     * @test
-     */
-    public function should_check_whitelist()
-    {
-        $whitelist = new StringWhitelist([
-            'url1',
-            'url2',
-            'url3',
-            'url4',
-        ]);
-        $instance = new Bearer($this->provider, null, null, $whitelist);
-
-        //in white list
-        $this->assertTrue($this->invoke($instance, 'shouldSkipAuthorizationForUri', ['url1']));
-        $this->assertTrue($this->invoke($instance, 'shouldSkipAuthorizationForUri', ['url2']));
-        $this->assertTrue($this->invoke($instance, 'shouldSkipAuthorizationForUri', ['url3']));
-        $this->assertTrue($this->invoke($instance, 'shouldSkipAuthorizationForUri', ['url4']));
-
-        //not in white list
-        $this->assertFalse($this->invoke($instance, 'shouldSkipAuthorizationForUri', ['url5']));
-        $this->assertFalse($this->invoke($instance, 'shouldSkipAuthorizationForUri', ['']));
-        $this->assertFalse($this->invoke($instance, 'shouldSkipAuthorizationForUri', [null]));
-        $this->assertFalse($this->invoke($instance, 'shouldSkipAuthorizationForUri', ['http://missing.com']));
-    }
-
-
-    /**
-     * @test
-     */
-    public function should_not_authorize_whitelisted_urls()
-    {
-        $validToken = new AccessToken(['access_token' => '123']);
-
-        $whitelist = new StringWhitelist([
-            'https://whitelisted.com',
-            'https://another.white.list.com'
-        ]);
-
-        $instance = new Bearer($this->provider, $validToken, null, $whitelist);
-
-        //Assert request is not changed for whitelisted url
-        $request = new Request('GET', 'https://whitelisted.com');
-        $result = $this->invoke($instance, 'authorizeRequest', [$request]);
-        $this->assertSame($request, $result);
-
-        //Assert request is not changed for whitelisted url
-        $request = new Request('GET', 'https://another.white.list.com');
-        $result = $this->invoke($instance, 'authorizeRequest', [$request]);
-        $this->assertSame($request, $result);
-
-        //Assert request is changed for whitelisted url
-        $request = new Request('GET', 'https://authorizeme.com');
-        $result = $this->invoke($instance, 'authorizeRequest', [$request]);
-        $this->assertResultAuthorizedWithToken($result, $validToken);
-    }
-
-    /**
-     * assertResultAuthorizedWithToken
-     * @param $result
-     * @param $accessToken
+     * @param RequestInterface $result
+     * @param AccessToken $accessToken
      * @return void
      */
     private function assertResultAuthorizedWithToken(RequestInterface $result, AccessToken $accessToken)
     {
         $this->assertTrue($result->hasHeader(Bearer::HEADER_AUTHORIZATION));
-        $this->assertContains(Bearer::AUTHENTICATION_SCHEME . ' ' . $accessToken->getToken(), $result->getHeader(Bearer::HEADER_AUTHORIZATION));
+        $this->assertContains(Bearer::TOKEN_TYPE . ' ' . $accessToken->getToken(),
+            $result->getHeader(Bearer::HEADER_AUTHORIZATION));
     }
 }
